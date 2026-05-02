@@ -12,6 +12,7 @@ import { Reviews } from "./components/Reviews";
 import { FAQ } from "./components/FAQ";
 import { Contact } from "./components/Contact";
 import { Footer, MobileStickyBar } from "./components/Footer";
+import { ChatWidget } from "./components/ChatWidget";
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
       </main>
       <Footer />
       <MobileStickyBar />
+      <ChatWidget />
     </div>
   );
 }
