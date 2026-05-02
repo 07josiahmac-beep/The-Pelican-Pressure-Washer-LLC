@@ -1,81 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { MessageCircle, X, Send, User, Bot, Loader2 } from 'lucide-react';
-import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
-
-let ai: GoogleGenAI | null = null;
-try {
-  // Try to use Vite's import.meta.env first, fallback to process.env if available
-  // Vercel handles standard process.env replacements in Next.js, but for pure Vite frontends, 
-  // you must use VITE_ prefix.
-  const apiKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) 
-                 || (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) 
-                 || "";
-  if (apiKey) {
-    ai = new GoogleGenAI({ apiKey });
-  }
-} catch (e) {
-  console.warn("Gemini API Key missing or process is not defined");
-}
-
-const captureLeadDeclaration: FunctionDeclaration = {
-  name: "captureLead",
-  description: "Captures the lead information and sends it to the owner. Call this ALWAYS when you have collected the user's name, phone number, and the service they need.",
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      name: { type: Type.STRING, description: "Customer's name" },
-      phone: { type: Type.STRING, description: "Customer's phone number" },
-      service: { type: Type.STRING, description: "The service requested (e.g., driveway cleaning, house washing)" },
-      summary: { type: Type.STRING, description: "A summary of the conversation in the format: 'New Lead: [Name] - [Phone] - Needs [Service] - [Key details]'" }
-    },
-    required: ["name", "phone", "service", "summary"]
-  }
-};
-
-const SYSTEM_INSTRUCTION = `You are a Website Assistant for "The Pelican Pressure Washer LLC".
-DO NOT heavily use the term "AI". Do not say "I am an AI". Act as a "Website Assistant", "Quick Help" or a helpful team member, not a bot.
-Phone: (503) 997-2313
-Email: the.pelican.pw@gmail.com
-Services: House washing, Driveway & concrete cleaning, Roof cleaning, Deck & patio cleaning, Fence cleaning, General pressure washing.
-Positioning: Reliable, high-quality pressure washing that improves curb appeal and restores surfaces.
-
-PRIMARY GOALS:
-1. Answer customer questions clearly and simply.
-2. Help visitors understand services and benefits.
-3. Guide users toward calling or requesting a quote.
-4. Capture lead information (name, phone, service needed).
-5. Escalate important or complex requests to the owner.
-
-PERSONALITY: Friendly and approachable. Simple and easy to understand. Helpful and quick. Slightly sales-aware but not pushy.
-
-RESPONSE RULES:
-- Keep answers short and clear. Avoid long paragraphs.
-- Always guide toward the next step.
-- Focus on being helpful and simple.
-
-COMMON QUESTIONS TO HANDLE:
-- How much does pressure washing cost?: Provide general pricing guidance but no exact quotes. Escalate or capture lead for exact quotes.
-- How long does it take?: Confident, simple answer. Usually depends on the size of the project.
-- Do you clean driveways / roofs / houses?: Yes.
-- Will it damage surfaces?: No, we use safe methods like Soft Washing for delicate surfaces.
-- How soon can I get service?: Capture their details and say we will contact them right away.
-
-LEAD CAPTURE FLOW (CRITICAL):
-When interest is shown, naturally move users toward requesting a quote or booking.
-Keep it conversational: e.g., "Got it — what's the best number to reach you at?"
-Collect: Name, Phone number, Type of service needed.
-Once all three are collected, you MUST call the "captureLead" function with these details. Do not wait.
-
-ESCALATION LOGIC:
-If you cannot answer a question (e.g., exact pricing, scheduling specifics, complex job questions), respond with:
-"I can have the owner reach out directly to go over that with you."
-Then collect: Name, Phone, Question details, and call the "captureLead" function with these details.
-
-SUMMARY FORMAT:
-When calling the "captureLead" function, provide a summary of the conversation in this format:
-"New Lead: [Name] - [Phone] - Needs [Service] - [Key details from conversation]"
-`;
+import { MessageCircle, X, Send, Bot } from 'lucide-react';
 
 type Message = {
   id: string;
@@ -92,24 +17,6 @@ export function ChatWidget() {
   const [inputMessage, setInputMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (!chatRef.current && ai) {
-      try {
-        chatRef.current = ai.chats.create({
-          model: "gemini-3-flash-preview",
-          config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
-            tools: [{ functionDeclarations: [captureLeadDeclaration] }],
-            temperature: 0.7,
-          }
-        });
-      } catch (err) {
-        console.error("Failed to initialize chat:", err);
-      }
-    }
-  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -121,51 +28,55 @@ export function ChatWidget() {
 
     const userMessage = inputMessage.trim();
     setInputMessage('');
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: userMessage }]);
+    
+    // Add user message to UI
+    const newMessages: Message[] = [...messages, { id: Date.now().toString(), role: 'user', content: userMessage }];
+    setMessages(newMessages);
     setIsTyping(true);
 
-    try {
-      if (!chatRef.current) {
-         setMessages(prev => [...prev, { 
-           id: Date.now().toString(), 
-           role: 'model', 
-           content: "The website owner has not configured the AI Assistant yet. Please call us directly!" 
-         }]);
-         setIsTyping(false);
-         return;
-      }
-      
-      const response = await chatRef.current.sendMessage({ message: userMessage });
-      
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        const call = response.functionCalls[0];
-        if (call.name === 'captureLead') {
-          const args = call.args as Record<string, any>;
-          
-          // Display the summary visibly for the owner/business context in this demo
-          setMessages(prev => [...prev, {
-            id: Date.now().toString() + '-summary',
-            role: 'model',
-            isLeadSummary: true,
-            content: args.summary || ("New Lead: " + args.name + " - " + args.phone + " - Needs " + args.service)
-          }]);
+    // Prepare messages to send to the backend, filtering out the visual lead summaries
+    const apiMessages = newMessages
+      .filter(m => !m.isLeadSummary)
+      .map(m => ({ role: m.role, content: m.content }));
 
-          // Get final thank you message from model
-          const followUp = await chatRef.current.sendMessage({
-            message: "SYSTEM ACTION: The lead was successfully saved! Please thank the user concisely and let them know we will be in touch shortly."
-          });
-          
-          setMessages(prev => [...prev, { 
-            id: Date.now().toString() + '-followup',
-            role: 'model', 
-            content: followUp.text || "Thanks! I've sent your details to the owner. We'll be in touch soon."
-          }]);
-        }
-      } else if (response.text) {
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: response.text }]);
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ messages: apiMessages })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned ${response.status}`);
       }
+
+      const data = await response.json();
+
+      if (data.functionCall && data.functionCall.name === 'captureLead') {
+          const args = data.functionCall.args;
+          
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString() + '-summary',
+              role: 'model',
+              isLeadSummary: true,
+              content: args.summary || ("New Lead: " + args.name + " - " + args.phone + " - Needs " + args.service)
+            },
+            { 
+              id: Date.now().toString() + '-followup',
+              role: 'model', 
+              content: data.text || "Thanks! I've sent your details to the owner. We'll be in touch soon."
+            }
+          ]);
+      } else if (data.text) {
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'model', content: data.text }]);
+      }
+      
     } catch (error) {
-      console.error("Chat error:", error);
+      console.error("Chat API error:", error);
       setMessages(prev => [...prev, { 
         id: Date.now().toString(), 
         role: 'model', 
