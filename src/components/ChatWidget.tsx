@@ -3,7 +3,20 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MessageCircle, X, Send, User, Bot, Loader2 } from 'lucide-react';
 import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+try {
+  // Try to use Vite's import.meta.env first, fallback to process.env if available
+  // Vercel handles standard process.env replacements in Next.js, but for pure Vite frontends, 
+  // you must use VITE_ prefix.
+  const apiKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) 
+                 || (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) 
+                 || "";
+  if (apiKey) {
+    ai = new GoogleGenAI({ apiKey });
+  }
+} catch (e) {
+  console.warn("Gemini API Key missing or process is not defined");
+}
 
 const captureLeadDeclaration: FunctionDeclaration = {
   name: "captureLead",
@@ -82,15 +95,19 @@ export function ChatWidget() {
   const chatRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!chatRef.current) {
-      chatRef.current = ai.chats.create({
-        model: "gemini-3-flash-preview",
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          tools: [{ functionDeclarations: [captureLeadDeclaration] }],
-          temperature: 0.7,
-        }
-      });
+    if (!chatRef.current && ai) {
+      try {
+        chatRef.current = ai.chats.create({
+          model: "gemini-3-flash-preview",
+          config: {
+            systemInstruction: SYSTEM_INSTRUCTION,
+            tools: [{ functionDeclarations: [captureLeadDeclaration] }],
+            temperature: 0.7,
+          }
+        });
+      } catch (err) {
+        console.error("Failed to initialize chat:", err);
+      }
     }
   }, []);
 
@@ -108,7 +125,15 @@ export function ChatWidget() {
     setIsTyping(true);
 
     try {
-      if (!chatRef.current) throw new Error("Chat not initialized");
+      if (!chatRef.current) {
+         setMessages(prev => [...prev, { 
+           id: Date.now().toString(), 
+           role: 'model', 
+           content: "The website owner has not configured the AI Assistant yet. Please call us directly!" 
+         }]);
+         setIsTyping(false);
+         return;
+      }
       
       const response = await chatRef.current.sendMessage({ message: userMessage });
       
